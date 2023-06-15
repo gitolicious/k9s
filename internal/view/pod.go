@@ -83,6 +83,7 @@ func (p *Pod) bindKeys(aa ui.KeyActions) {
 	aa.Add(ui.KeyActions{
 		ui.KeyN:      ui.NewKeyAction("Show Node", p.showNode, true),
 		ui.KeyF:      ui.NewKeyAction("Show PortForward", p.showPFCmd, true),
+		ui.KeyO:      ui.NewKeyAction("Show Owner", p.showOwner, true),
 		ui.KeyShiftR: ui.NewKeyAction("Sort Ready", p.GetTable().SortColCmd(readyCol, true), false),
 		ui.KeyShiftT: ui.NewKeyAction("Sort Restart", p.GetTable().SortColCmd("RESTARTS", false), false),
 		ui.KeyShiftS: ui.NewKeyAction("Sort Status", p.GetTable().SortColCmd(statusCol, true), false),
@@ -155,6 +156,50 @@ func (p *Pod) showNode(evt *tcell.EventKey) *tcell.EventKey {
 	no.SetInstance(pod.Spec.NodeName)
 	//no.SetContextFn(nodeContext(pod.Spec.NodeName))
 	if err := p.App().inject(no, false); err != nil {
+		p.App().Flash().Err(err)
+	}
+
+	return nil
+}
+
+func (p *Pod) showOwner(evt *tcell.EventKey) *tcell.EventKey {
+	path := p.GetTable().GetSelectedItem()
+	if path == "" {
+		return evt
+	}
+	pod, err := fetchPod(p.App().factory, path)
+	if err != nil {
+		p.App().Flash().Err(err)
+		return nil
+	}
+	if len(pod.GetObjectMeta().GetOwnerReferences()) == 0 {
+		p.App().Flash().Err(errors.New("no owner reference found"))
+		return nil
+	}
+
+	var owner model.Component
+	for _, ownerReference := range pod.GetObjectMeta().GetOwnerReferences() {
+		if ownerReference.Kind == "ReplicaSet" {
+			rs := NewReplicaSet(client.NewGVR("apps/v1/replicasets"))
+			rs.SetInstance(pod.Namespace + "/" + rs.Name())
+
+			owner = rs
+			break
+		} else if ownerReference.Kind == "DaemonSet" {
+			ds := NewDaemonSet(client.NewGVR("apps/v1/daemonsets"))
+			ds.SetInstance(pod.Namespace + "/" + ds.Name())
+
+			owner = ds
+			break
+		}
+
+	}
+	if owner == nil {
+		p.App().Flash().Err(errors.New("no ReplicaSet or DaemonSet owner reference found"))
+		return nil
+	}
+
+	if err := p.App().inject(owner, false); err != nil {
 		p.App().Flash().Err(err)
 	}
 
